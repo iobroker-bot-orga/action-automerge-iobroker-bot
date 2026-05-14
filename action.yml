@@ -363,7 +363,7 @@ runs:
               } catch (autoMergeError) {
                 core.setFailed(
                   'Direct merge was denied (403) and enabling auto-merge failed. ' +
-                  'Ensure the workflow token can write contents or provide a PAT via input github-token. ' +
+                  'Ensure the workflow token has required write permissions (contents/pull-requests) or provide a PAT via input github-token. ' +
                   `Fallback error: ${autoMergeError.message}`
                 );
                 return;

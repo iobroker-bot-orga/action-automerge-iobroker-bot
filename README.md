@@ -12,6 +12,7 @@ This action is based on `iobroker-bot-orga/action-automerge-dependabot` with the
 - only PRs created by `ioBroker-Bot` are eligible
 - PRs containing `do not automerge` (case-insensitive) in the PR description are never merged
 - an optional `pull-request-ref` input can be used to explicitly pass the PR reference
+- if direct REST merge is denied with `403 Resource not accessible by integration`, the action falls back to enabling GitHub auto-merge
 
 ## Usage
 

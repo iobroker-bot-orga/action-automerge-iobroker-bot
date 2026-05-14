@@ -315,11 +315,54 @@ runs:
             return;
           }
 
-          await github.rest.pulls.merge({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            pull_number: prNumber,
-            merge_method: mergeMethod,
-          });
+          const mergeMethodToAutoMergeMethod = {
+            merge: 'MERGE',
+            squash: 'SQUASH',
+            rebase: 'REBASE',
+          };
 
-          core.info(`Successfully merged PR #${prNumber} using ${mergeMethod}.`);
+          try {
+            await github.rest.pulls.merge({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+              merge_method: mergeMethod,
+            });
+
+            core.info(`Successfully merged PR #${prNumber} using ${mergeMethod}.`);
+          } catch (error) {
+            if (error.status === 403) {
+              core.warning(
+                'Direct merge failed with 403 (Resource not accessible by integration). ' +
+                'Trying to enable auto-merge as a fallback.'
+              );
+
+              try {
+                await github.graphql(
+                  `mutation EnableAutoMerge($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod!) {
+                    enablePullRequestAutoMerge(input: { pullRequestId: $pullRequestId, mergeMethod: $mergeMethod }) {
+                      pullRequest {
+                        number
+                      }
+                    }
+                  }`,
+                  {
+                    pullRequestId: pr.node_id,
+                    mergeMethod: mergeMethodToAutoMergeMethod[mergeMethod] ?? 'MERGE',
+                  }
+                );
+
+                core.info(`Enabled auto-merge for PR #${prNumber} using ${mergeMethod}.`);
+                return;
+              } catch (autoMergeError) {
+                core.setFailed(
+                  'Direct merge was denied (403) and enabling auto-merge failed. ' +
+                  'Ensure the workflow token can write contents or provide a PAT via input github-token. ' +
+                  `Fallback error: ${autoMergeError.message}`
+                );
+                return;
+              }
+            }
+
+            throw error;
+          }

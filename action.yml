@@ -36,6 +36,21 @@ inputs:
     required: false
     default: '45'
 
+  initial-check-delay-seconds:
+    description: 'Initial delay before evaluating whether checks exist'
+    required: false
+    default: '10'
+
+  mergeable-max-wait-time:
+    description: 'Maximum time in seconds to wait for GitHub to compute PR mergeability'
+    required: false
+    default: '600'
+
+  mergeable-poll-interval-seconds:
+    description: 'Polling interval in seconds while waiting for PR mergeability'
+    required: false
+    default: '15'
+
 outputs:
   should-merge:
     description: 'Whether the PR should be merged'
@@ -140,7 +155,9 @@ runs:
 
           const maxWaitTime = Number('${{ inputs.max-wait-time }}') * 1000;
           const pollInterval = Number('${{ inputs.poll-interval-seconds }}') * 1000;
+          const initialDelay = Number('${{ inputs.initial-check-delay-seconds }}') * 1000;
           const startTime = Date.now();
+          let hasWaitedInitialDelay = false;
 
           while (Date.now() - startTime < maxWaitTime) {
             const { data: currentPR } = await github.rest.pulls.get({
@@ -150,6 +167,7 @@ runs:
             });
 
             if (currentPR.state !== 'open') {
+              core.info(`PR #${prNumber} is no longer open (state: ${currentPR.state}). Stopping check wait.`);
               core.setOutput('checks_passed', 'false');
               return false;
             }
@@ -167,6 +185,11 @@ runs:
             });
 
             if (otherChecks.length === 0) {
+              if (!hasWaitedInitialDelay && initialDelay > 0) {
+                hasWaitedInitialDelay = true;
+                await new Promise((resolve) => setTimeout(resolve, initialDelay));
+                continue;
+              }
               core.setOutput('checks_passed', 'true');
               return true;
             }
@@ -218,8 +241,8 @@ runs:
             pull_number: prNumber,
           });
 
-          const maxMergeableWaitMs = 10 * 60 * 1000;
-          const mergeablePollIntervalMs = 15 * 1000;
+          const maxMergeableWaitMs = Number('${{ inputs.mergeable-max-wait-time }}') * 1000;
+          const mergeablePollIntervalMs = Number('${{ inputs.mergeable-poll-interval-seconds }}') * 1000;
           const mergeableWaitStart = Date.now();
 
           while (pr.mergeable === null && (Date.now() - mergeableWaitStart) < maxMergeableWaitMs) {

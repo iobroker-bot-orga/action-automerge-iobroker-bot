@@ -47,3 +47,6 @@ jobs:
 - `wait-for-checks` (optional, default `true`): wait for checks before merging.
 - `max-wait-time` (optional, default `3600`): maximum waiting time in seconds.
 - `poll-interval-seconds` (optional, default `45`): polling interval while waiting for checks.
+- `initial-check-delay-seconds` (optional, default `10`): initial delay before deciding that no checks exist.
+- `mergeable-max-wait-time` (optional, default `600`): max wait time for GitHub mergeability calculation.
+- `mergeable-poll-interval-seconds` (optional, default `15`): polling interval while waiting for mergeability.

@@ -31,6 +31,11 @@ inputs:
     required: false
     default: '3600'
 
+  poll-interval-seconds:
+    description: 'Polling interval in seconds while waiting for checks'
+    required: false
+    default: '45'
+
 outputs:
   should-merge:
     description: 'Whether the PR should be merged'
@@ -134,7 +139,7 @@ runs:
           };
 
           const maxWaitTime = Number('${{ inputs.max-wait-time }}') * 1000;
-          const pollInterval = 45 * 1000;
+          const pollInterval = Number('${{ inputs.poll-interval-seconds }}') * 1000;
           const startTime = Date.now();
 
           while (Date.now() - startTime < maxWaitTime) {
@@ -156,7 +161,10 @@ runs:
               per_page: 100,
             });
 
-            const otherChecks = checkRuns.check_runs.filter((check) => check.name !== context.job);
+            const currentRunUrlPart = `/actions/runs/${context.runId}`;
+            const otherChecks = checkRuns.check_runs.filter((check) => {
+              return !(check.details_url || '').includes(currentRunUrlPart);
+            });
 
             if (otherChecks.length === 0) {
               core.setOutput('checks_passed', 'true');
@@ -210,13 +218,28 @@ runs:
             pull_number: prNumber,
           });
 
+          const maxMergeableWaitMs = 10 * 60 * 1000;
+          const mergeablePollIntervalMs = 15 * 1000;
+          const mergeableWaitStart = Date.now();
+
+          while (pr.mergeable === null && (Date.now() - mergeableWaitStart) < maxMergeableWaitMs) {
+            await new Promise((resolve) => setTimeout(resolve, mergeablePollIntervalMs));
+            const refreshed = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            pr.mergeable = refreshed.data.mergeable;
+            pr.state = refreshed.data.state;
+          }
+
           if (pr.state !== 'open') {
             core.info(`PR #${prNumber} is no longer open (state: ${pr.state}).`);
             return;
           }
 
-          if (pr.mergeable === false) {
-            core.setFailed('PR is not mergeable.');
+          if (pr.mergeable !== true) {
+            core.setFailed(`PR is not mergeable (mergeable=${pr.mergeable}).`);
             return;
           }
 

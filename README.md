@@ -46,3 +46,4 @@ jobs:
 - `merge-method` (optional, default `merge`): `merge`, `squash`, or `rebase`.
 - `wait-for-checks` (optional, default `true`): wait for checks before merging.
 - `max-wait-time` (optional, default `3600`): maximum waiting time in seconds.
+- `poll-interval-seconds` (optional, default `45`): polling interval while waiting for checks.

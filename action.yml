@@ -152,6 +152,10 @@ runs:
           const isSuccessfulConclusion = (conclusion) => {
             return conclusion === 'success' || conclusion === 'skipped' || conclusion === 'neutral';
           };
+          const getCheckIcon = (check) => {
+            if (check.status !== 'completed') return '⏳';
+            return isSuccessfulConclusion(check.conclusion) ? '✅' : '❌';
+          };
 
           const maxWaitTime = Number('${{ inputs.max-wait-time }}') * 1000;
           const pollInterval = Number('${{ inputs.poll-interval-seconds }}') * 1000;
@@ -159,8 +163,18 @@ runs:
           const startTime = Date.now();
           let hasWaitedInitialDelay = false;
           let checksPassed = false;
+          let otherChecks = [];
+          let attempt = 0;
+
+          core.info('='.repeat(80));
+          core.info('⏳ WAITING FOR CI CHECKS');
+          core.info(`PR: #${prNumber}`);
+          core.info(`Commit SHA: ${headSha}`);
+          core.info(`Timeout: ${Math.floor(maxWaitTime / 1000)}s, Poll interval: ${Math.floor(pollInterval / 1000)}s`);
+          core.info('='.repeat(80));
 
           while (Date.now() - startTime < maxWaitTime) {
+            attempt += 1;
             const { data: currentPR } = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -168,7 +182,7 @@ runs:
             });
 
             if (currentPR.state !== 'open') {
-              core.info(`PR #${prNumber} is no longer open (state: ${currentPR.state}). Stopping check wait.`);
+              core.info(`⚠️  PR #${prNumber} is no longer open (state: ${currentPR.state}). Stopping check wait.`);
               break;
             }
 
@@ -180,38 +194,66 @@ runs:
             });
 
             const currentRunUrlPart = `/actions/runs/${context.runId}`;
-            const otherChecks = checkRuns.check_runs.filter((check) => {
+            otherChecks = checkRuns.check_runs.filter((check) => {
               return !(check.details_url || '').includes(currentRunUrlPart);
             });
+
+            core.info(`🔎 Attempt ${attempt}: found ${otherChecks.length} other check(s).`);
 
             if (otherChecks.length === 0) {
               if (!hasWaitedInitialDelay && initialDelay > 0) {
                 hasWaitedInitialDelay = true;
+                core.info(`⏱️  No checks found yet. Waiting initial ${Math.floor(initialDelay / 1000)}s before re-checking...`);
                 await new Promise((resolve) => setTimeout(resolve, initialDelay));
                 continue;
               }
+              core.info('✅ No other checks to wait for.');
               checksPassed = true;
               break;
             }
 
             const pending = otherChecks.filter((check) => check.status !== 'completed');
             const failed = otherChecks.filter((check) => check.status === 'completed' && !isSuccessfulConclusion(check.conclusion));
+            const successful = otherChecks.filter((check) => check.status === 'completed' && isSuccessfulConclusion(check.conclusion));
+
+            core.info(`📊 Status: ${successful.length} successful, ${pending.length} pending, ${failed.length} failed`);
 
             if (failed.length > 0) {
+              core.info('❌ Failed checks detected:');
+              failed.forEach((check) => {
+                core.info(`  ${getCheckIcon(check)} ${check.name}: ${check.conclusion ?? check.status} (${check.html_url})`);
+              });
               throw new Error(`${failed.length} check(s) failed - cannot automerge`);
             }
 
             if (pending.length === 0) {
+              core.info('✅ All checks completed successfully:');
+              otherChecks.forEach((check) => {
+                core.info(`  ${getCheckIcon(check)} ${check.name}: ${check.conclusion ?? check.status}`);
+              });
               checksPassed = true;
               break;
             }
 
+            core.info(`⏳ Waiting for ${pending.length} pending check(s):`);
+            pending.forEach((check) => {
+              core.info(`  ${getCheckIcon(check)} ${check.name}: ${check.status}`);
+            });
+            core.info(`↻ Polling again in ${Math.floor(pollInterval / 1000)}s...`);
             await new Promise((resolve) => setTimeout(resolve, pollInterval));
           }
 
           if (checksPassed) {
+            core.info('✅ Check wait phase completed successfully.');
             core.setOutput('checks_passed', 'true');
           } else if (Date.now() - startTime >= maxWaitTime) {
+            core.info('⏱️  Timeout reached while waiting for checks.');
+            if (otherChecks.length > 0) {
+              core.info('Last known check states:');
+              otherChecks.forEach((check) => {
+                core.info(`  ${getCheckIcon(check)} ${check.name}: ${check.conclusion ?? check.status}`);
+              });
+            }
             throw new Error('Timeout waiting for checks to complete');
           } else {
             core.setOutput('checks_passed', 'false');
@@ -247,6 +289,9 @@ runs:
           const mergeablePollIntervalMs = Number('${{ inputs.mergeable-poll-interval-seconds }}') * 1000;
           const mergeableWaitStart = Date.now();
 
+          if (pr.mergeable === null) {
+            core.info(`⏳ PR mergeability is still being computed. Waiting up to ${Math.floor(maxMergeableWaitMs / 1000)}s...`);
+          }
           while (pr.mergeable === null && (Date.now() - mergeableWaitStart) < maxMergeableWaitMs) {
             await new Promise((resolve) => setTimeout(resolve, mergeablePollIntervalMs));
             const refreshed = await github.rest.pulls.get({
@@ -256,6 +301,8 @@ runs:
             });
             pr.mergeable = refreshed.data.mergeable;
             pr.state = refreshed.data.state;
+            const elapsed = Math.floor((Date.now() - mergeableWaitStart) / 1000);
+            core.info(`🔄 Mergeability check after ${elapsed}s: mergeable=${pr.mergeable}, state=${pr.state}`);
           }
 
           if (pr.state !== 'open') {

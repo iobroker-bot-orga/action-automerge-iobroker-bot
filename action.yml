@@ -320,6 +320,12 @@ runs:
             squash: 'SQUASH',
             rebase: 'REBASE',
           };
+          const autoMergeMethod = mergeMethodToAutoMergeMethod[mergeMethod];
+
+          if (!autoMergeMethod) {
+            core.setFailed(`Unsupported merge method: ${mergeMethod}. Use merge, squash, or rebase.`);
+            return;
+          }
 
           try {
             await github.rest.pulls.merge({
@@ -348,11 +354,11 @@ runs:
                   }`,
                   {
                     pullRequestId: pr.node_id,
-                    mergeMethod: mergeMethodToAutoMergeMethod[mergeMethod] ?? 'MERGE',
+                    mergeMethod: autoMergeMethod,
                   }
                 );
 
-                core.info(`Enabled auto-merge for PR #${prNumber} using ${mergeMethod}.`);
+                core.info(`Enabled auto-merge for PR #${prNumber} using ${mergeMethod} (${autoMergeMethod}).`);
                 return;
               } catch (autoMergeError) {
                 core.setFailed(

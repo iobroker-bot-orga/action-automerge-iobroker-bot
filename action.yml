@@ -158,6 +158,7 @@ runs:
           const initialDelay = Number('${{ inputs.initial-check-delay-seconds }}') * 1000;
           const startTime = Date.now();
           let hasWaitedInitialDelay = false;
+          let checksPassed = false;
 
           while (Date.now() - startTime < maxWaitTime) {
             const { data: currentPR } = await github.rest.pulls.get({
@@ -168,8 +169,7 @@ runs:
 
             if (currentPR.state !== 'open') {
               core.info(`PR #${prNumber} is no longer open (state: ${currentPR.state}). Stopping check wait.`);
-              core.setOutput('checks_passed', 'false');
-              return false;
+              break;
             }
 
             const { data: checkRuns } = await github.rest.checks.listForRef({
@@ -190,30 +190,32 @@ runs:
                 await new Promise((resolve) => setTimeout(resolve, initialDelay));
                 continue;
               }
-              core.setOutput('checks_passed', 'true');
-              return true;
+              checksPassed = true;
+              break;
             }
 
             const pending = otherChecks.filter((check) => check.status !== 'completed');
             const failed = otherChecks.filter((check) => check.status === 'completed' && !isSuccessfulConclusion(check.conclusion));
 
             if (failed.length > 0) {
-              core.setOutput('checks_passed', 'false');
-              core.setFailed(`${failed.length} check(s) failed - cannot automerge`);
-              return false;
+              throw new Error(`${failed.length} check(s) failed - cannot automerge`);
             }
 
             if (pending.length === 0) {
-              core.setOutput('checks_passed', 'true');
-              return true;
+              checksPassed = true;
+              break;
             }
 
             await new Promise((resolve) => setTimeout(resolve, pollInterval));
           }
 
-          core.setOutput('checks_passed', 'false');
-          core.setFailed('Timeout waiting for checks to complete');
-          return false;
+          if (checksPassed) {
+            core.setOutput('checks_passed', 'true');
+          } else if (Date.now() - startTime >= maxWaitTime) {
+            throw new Error('Timeout waiting for checks to complete');
+          } else {
+            core.setOutput('checks_passed', 'false');
+          }
 
     - name: Set checks passed when not waiting
       if: |
